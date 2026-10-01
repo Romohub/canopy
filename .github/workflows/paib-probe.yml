@@ -1,0 +1,63 @@
+name: PAIB endpoint probe
+on:
+  push:
+    branches: [paib-benchmark-run-20261001]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe Kilo model list
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --max-time 30 https://api.kilo.ai/api/openrouter/models -o kilo_models.json
+          python - <<'PY'
+          import json
+          d=json.load(open("kilo_models.json"))
+          ids=[x.get("id","") for x in d.get("data",[])]
+          free=[x for x in ids if ":free" in x]
+          print("free_count",len(free))
+          print("\n".join(free[:20]))
+          PY
+
+      - name: Probe Kilo completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          MODEL=$(python - <<'PY'
+          import json
+          d=json.load(open("kilo_models.json"))
+          ids=[x.get("id","") for x in d.get("data",[])]
+          prefs=["nvidia/nemotron-3-super-120b-a12b:free","inclusionai/ling-2.6-1t:free","stepfun/step-3.5-flash:free"]
+          print(next((x for x in prefs if x in ids), next(x for x in ids if ":free" in x)))
+          PY
+          )
+          echo "KILO_MODEL=$MODEL"
+          python - <<'PY'
+          import json, os, urllib.request
+          model=os.popen("""python - <<'P'
+import json
+d=json.load(open('kilo_models.json'))
+ids=[x.get('id','') for x in d.get('data',[])]
+prefs=['nvidia/nemotron-3-super-120b-a12b:free','inclusionai/ling-2.6-1t:free','stepfun/step-3.5-flash:free']
+print(next((x for x in prefs if x in ids), next(x for x in ids if ':free' in x)))
+P""").read().strip()
+          body=json.dumps({"model":model,"messages":[{"role":"system","content":"Reply exactly OK"},{"role":"user","content":"test"}],"temperature":0,"stream":False}).encode()
+          req=urllib.request.Request("https://api.kilo.ai/api/openrouter/chat/completions",data=body,headers={"Content-Type":"application/json"})
+          with urllib.request.urlopen(req,timeout=90) as r:
+              print(r.status, r.read().decode()[:2000])
+          PY
+
+      - name: Probe Murakumo completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.request
+          body=json.dumps({"model":"murakumo-main","messages":[{"role":"system","content":"Reply exactly OK"},{"role":"user","content":"test"}],"temperature":0,"max_tokens":32}).encode()
+          req=urllib.request.Request("https://api.murakumo.cloud/v1/chat/completions",data=body,headers={"Content-Type":"application/json"})
+          with urllib.request.urlopen(req,timeout=420) as r:
+              print(r.status, r.read().decode()[:2000])
+          PY

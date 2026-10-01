@@ -1,5 +1,7 @@
 name: PAIB endpoint probe
-on: push
+on:
+  pull_request:
+    branches: [main]
 
 jobs:
   probe:
@@ -7,4 +9,15 @@ jobs:
     steps:
       - name: Network probe
         run: |
-          python -c "import urllib.request; print(urllib.request.urlopen('https://api.kilo.ai/api/openrouter/models', timeout=30).status)"
+          python - <<'PY'
+          import urllib.request
+          for u in [
+            "https://api.kilo.ai/api/openrouter/models",
+            "https://api.murakumo.cloud/v1/models"
+          ]:
+              try:
+                  with urllib.request.urlopen(u, timeout=30) as r:
+                      print(u, r.status, r.read(300).decode(errors="replace"))
+              except Exception as e:
+                  print(u, "ERROR", repr(e))
+          PY

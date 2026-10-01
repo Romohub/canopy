@@ -3,10 +3,14 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: paib-benchmark-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Run PAIB on three live models
         env:
@@ -28,39 +32,12 @@ jobs:
               data=json.dumps(body,ensure_ascii=False).encode()
               req=urllib.request.Request(url,data=data,headers={'Content-Type':'application/json','User-Agent':'PAIB/0.1'})
               with urllib.request.urlopen(req,timeout=timeout) as r:return json.loads(r.read().decode())
-          kilo=get_json('https://api.kilo.ai/api/openrouter/models').get('data',[])
-          ids=[m.get('id','') for m in kilo if ':free' in m.get('id','') and '/' in m.get('id','')]
-          prefs=['qwen','deepseek','gemma','llama','mistral','nemotron','step','glm','minimax']
-          candidates=[]
-          for p in prefs:
-              for mid in ids:
-                  if p in mid.lower() and mid not in candidates:candidates.append(mid)
-          candidates += [x for x in ids if x not in candidates]
-          selected=[]
-          for mid in candidates:
-              try:
-                  z=post('https://api.kilo.ai/api/openrouter/chat/completions',{'model':mid,'messages':[{'role':'system','content':'Reply exactly OK'},{'role':'user','content':'test'}],'temperature':0,'max_tokens':16,'stream':False},60)
-                  txt=z['choices'][0]['message']['content']
-                  print('PROBE_OK',mid,repr(txt),flush=True)
-                  selected.append(('kilo',mid))
-                  if len(selected)>=3:break
-              except Exception as e:
-                  print('PROBE_FAIL',mid,repr(e),flush=True)
-          if len(selected)<3:
-              try:
-                  mm=get_json('https://api.murakumo.cloud/v1/models').get('data',[])
-                  for m in mm:
-                      mid=m.get('id','')
-                      if not m.get('is_ready'): continue
-                      try:
-                          z=post('https://api.murakumo.cloud/v1/chat/completions',{'model':mid,'messages':[{'role':'system','content':'Reply exactly OK'},{'role':'user','content':'test'}],'temperature':0,'max_tokens':16},120)
-                          print('PROBE_OK_MURAKUMO',mid,flush=True);selected.append(('murakumo',mid))
-                          if len(selected)>=3:break
-                      except Exception as e: print('PROBE_FAIL_MURAKUMO',mid,repr(e),flush=True)
-              except Exception as e: print('MURAKUMO_LIST_FAIL',repr(e),flush=True)
-          if len(selected)<3:
-              raise SystemExit(f'Only {len(selected)} live models available: {selected}')
-          selected=selected[:3]
+          selected=[
+              ('kilo','nvidia/nemotron-3-ultra-550b-a55b:free'),
+              ('kilo','poolside/laguna-s-2.1:free'),
+              ('kilo','dots-studio/dots-3-note-preview:free'),
+          ]
+          print('SELECTED',selected,flush=True)
           print('SELECTED',selected,flush=True)
           summary=[]
           for provider,mid in selected:
@@ -75,15 +52,15 @@ jobs:
                       url='https://api.kilo.ai/api/openrouter/chat/completions' if provider=='kilo' else 'https://api.murakumo.cloud/v1/chat/completions'
                       txt=''
                       err=''
-                      for attempt in range(4):
+                      for attempt in range(2):
                           try:
-                              z=post(url,body,120)
+                              z=post(url,body,45)
                               txt=z['choices'][0]['message']['content'];break
                           except Exception as e:
-                              err=repr(e);time.sleep(2+attempt*3)
+                              err=repr(e);time.sleep(2+attempt*2)
                       print(f'{mid} [{n}/{len(items)}] {item["id"]} => {repr(txt)[:140]} err={err if not txt else ""}',flush=True)
                       w.writerow({'id':item['id'],'model_name':mid,'response':txt});f.flush()
-                      time.sleep(0.7)
+                      time.sleep(0.25)
               report=f'paib_results/report_{safe}.md'
               subprocess.run(['python','evaluate.py','--responses',out,'--report',report],check=True)
               text=open(report,encoding='utf-8').read()

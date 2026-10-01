@@ -49,12 +49,12 @@ jobs:
                   for n,item in enumerate(items,1):
                       user=item['user_fa']
                       if item.get('untrusted_fa'): user+='\\n\\nدادهٔ غیرقابل‌اعتماد:\\n'+item['untrusted_fa']
-                      body={'model':mid,'messages':[{'role':'system','content':item['system_fa']},{'role':'user','content':user}],'temperature':0,'max_tokens':256,'stream':False}
+                      body={'model':mid,'messages':[{'role':'system','content':item['system_fa']},{'role':'user','content':user}],'temperature':0,'max_tokens':64,'stream':False,'reasoning':{'enabled':False}}
                       url='https://api.kilo.ai/api/openrouter/chat/completions'
                       txt=''; err=''
-                      for attempt in range(2):
+                      for attempt in range(1):
                           try:
-                              z=post(url,body,45)
+                              z=post(url,body,30)
                               txt=z['choices'][0]['message']['content'];break
                           except Exception as ex:
                               err=repr(ex);time.sleep(2+attempt*2)
